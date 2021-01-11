@@ -1,6 +1,7 @@
 /** Basic Point class to use in an example particle animation
-Iain Martin
-November 2018
+* Based on Iain Martin November 2018
+* 
+* Dancho Atanasov 2020
 */
 #pragma once
 

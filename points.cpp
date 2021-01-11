@@ -1,6 +1,7 @@
 /** Basic Point class to use in an example particle animation 
- Iain Martin
- November 2018
+ *Based on Iain Martin November 2018
+ * 
+ * Dancho Atanasov 2020
  */
 
 #include "points.h"
@@ -43,8 +44,6 @@ void  points::create()
 	{
 		vertices[i] = glm::ballRand(0.08f); // 0.1f //1.f
 		colours[i] = glm::vec3(170.f/255, 213.f/255, 247.f/255);  // Set to snowflake colour
-		//velocity[i] = glm::vec3(glm::ballRand(glm::linearRand(0.0, 0.01)));
-		//velocity[i] = glm::vec3(glm::linearRand(-0.01, 0.01), -glm::linearRand(0.005, 0.01), 0.f);  // Move in the negative y direction
 		velocity[i] = glm::vec3(glm::linearRand(-0.01, 0.01), -glm::linearRand(0.005, 0.01), glm::linearRand(-0.01, 0.01));
 		initial_direction[i] = velocity[i];
 	}
@@ -88,13 +87,6 @@ void points::animate()
 		if (dist < maxdist) vertices[i] = new_vertex;
 		else if (dist == maxdist) {}
 		else vertices[i] = vertices[i] * (maxdist / dist); // Stop snowflakes at maxdistance which should be the radius of the snowglobe
-
-		// If we are near the origin then we introduce a new random direction
-		//if (dist < 0.01f) velocity[i] = glm::vec3(glm::ballRand(glm::linearRand(0.0, 0.02)));
-
-		// If we are too far away then change direction back to the origin
-		//if (dist > maxdist) velocity[i] = -vertices[i] / 500.f * speed;
-		//if (dist > maxdist) velocity[i] = glm::vec3(0.f, 0.f, 0.f); //*= -1;
 	}
 
 	// Update the vertex buffer data
@@ -111,7 +103,6 @@ void points::updateAngle(GLfloat x, GLfloat y, GLfloat z, glm::mat4 rotation_mat
 		{
 			velocity[i] = glm::vec3(fix_matrix * glm::vec4(initial_direction[i], 0.f));
 		}
-
 		angle_x = x;
 		angle_y = y;
 		angle_z = z;

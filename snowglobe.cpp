@@ -1,8 +1,10 @@
 /**
  * Main class for snowglobe project
+ * Renders a 3D scene in a room with wooden walls and a lamppost in a
+ * snowglobe on a table
+ * Includes object loading, texturing, particle animations with some shadows
  * 
  * Dancho Atanasov 2020
- * 
  */
 
 
@@ -32,6 +34,7 @@ if you prefer */
 
 #include "points.h"
 
+// Custom Shader class that holds unform IDs
 class Shader {
 public:
 	GLuint shaderID;
@@ -43,6 +46,7 @@ public:
 	GLuint point_sizeID;
 	GLuint lightposID;
 	GLuint normalmatrixID;
+	GLuint emitmodeID;
 	//GLuint tex_matrixID;
 
 	Shader() {
@@ -63,6 +67,8 @@ public:
 		this->lightposID = glGetUniformLocation(shaderID, "lightpos");
 		this->normalmatrixID = glGetUniformLocation(shaderID, "normalmatrix");
 
+		this->emitmodeID = glGetUniformLocation(shaderID, "emitmode");
+
 		//this->tex_matrixID = glGetUniformLocation(shaderID, "tex_matrix");
 
 		GLuint loc = glGetUniformLocation(shaderID, "tex1");
@@ -71,7 +77,7 @@ public:
 };
 
 Shader * program;		/* Identifier for the shader prgoram */
-GLuint const NUM_OF_SHADERS = 4;
+GLuint const NUM_OF_SHADERS = 5;
 Shader shaders[NUM_OF_SHADERS];
 
 GLuint vao;			/* Vertex array (Containor) object. This is the index of the VAO that will be the container for
@@ -80,6 +86,7 @@ GLuint vao;			/* Vertex array (Containor) object. This is the index of the VAO t
 GLuint colourmode;	/* Index of a uniform to switch the colour mode in the vertex shader
 					  I've included this to show you how to pass in an unsigned integer into
 					  your vertex shader. */
+GLuint emitmode;
 
 /* Position and view globals */
 GLfloat angle_x, angle_inc_x, x, scaler, z, y;
@@ -146,6 +153,33 @@ GLfloat floor_data[] = {
 using namespace std;
 using namespace glm;
 
+// Calculate shadow projection matrix from Light pos (or direction)
+// and the plane equatino coefficients.
+// This matrix works both for direction and positional lights.
+mat4 shadow_matrix(vec4 L, vec4 P)
+{
+	//dot product of normal and light position/direction
+	GLfloat rdotl = P.x * L.x + P.y * L.y + P.z * L.z + P.w * L.w;
+
+	// Define the shadow projection matix
+	return mat4(-P.x * L.x + rdotl,
+		-P.x * L.y,
+		-P.x * L.z,
+		-P.x * L.w,
+		-P.y * L.x,
+		-P.y * L.y + rdotl,
+		-P.y * L.z,
+		-P.y * L.w,
+		-P.z * L.x,
+		-P.z * L.y,
+		-P.z * L.z + rdotl,
+		-P.z * L.w,
+		-P.w * L.x,
+		-P.w * L.y,
+		-P.w * L.z,
+		-P.w * L.w + rdotl);
+}
+
 /**
 *Uses stb_image.h to loadand imageand create a texture from it
 */
@@ -203,17 +237,18 @@ void init(GLWrapper *glw)
 	z = 0;
 	angle_x = angle_y = angle_z = 0;
 	angle_inc_x = angle_inc_y = angle_inc_z = 0;
-	light_x = 0; light_y = 0.5f; light_z = 0;
+	light_x = 0; light_y = 0.28f; light_z = 0;
 	vx = vy = vz = 0;
 	scaler = 1.f;
 	aspect_ratio = 1.3333f;
 	colourmode = 0;
 	alphaValue = 0.4;
 	step_back = 0.f;
+	emitmode = 0;
 
 	// Set point parameters
-	speed = 0.5f;//0.1f;
-	maxdist = 0.162f; ;//1.f;
+	speed = 0.5f;
+	maxdist = 0.162f; ;
 	point_anim = new points(1000, maxdist, speed);
 	point_anim->create();
 	point_size = 15;
@@ -224,20 +259,17 @@ void init(GLWrapper *glw)
 	// Create the vertex array object and make it current
 	glBindVertexArray(vao);
 
-	/* Load and create our lamppost object*/
-	lamppost.load_obj("lamp_post_4.obj");
-	// Set all the colour vertices to blue
-	// Note that this is a quick hack, it would be better to load and process the mtl file
+	lamppost.load_obj("obj\\lamp_post_4.obj");
 	lamppost.overrideColour(vec4(0.8f, 0.8f, 0.8f, 1.f));
 
-	table.load_obj("table_with_tex.obj");
+	table.load_obj("obj\\table_with_tex.obj");
 	table.overrideColour(vec4(0.8f, 0.8f, 0.8f, 1.f));
 
 	// Creater the sphere (params are num_lats and num_longs)
 	aSphere.makeSphere(60, 60);
 
 	GLuint* textures[] = { &texID, &particle_texID, &floor_texID, &back_wall_texID, &table_texID, &window_texID};
-	const GLchar* texture_filenames[] = { "..\\..\\images\\glass1.jpg", "..\\..\\images\\snowflake2.png", "..\\..\\images\\wooden_plank_2.jpg", "..\\..\\images\\wooden_plank_3.jpg", "..\\..\\images\\wood_table_1.jpg", "..\\..\\images\\old_house_window.jpg" };
+	const GLchar* texture_filenames[] = { "images\\glass1.jpg", "images\\snowflake2.png", "images\\wooden_plank_2.jpg", "images\\wooden_plank_3.jpg", "images\\wood_table_1.jpg", "images\\old_house_window.jpg" };
 	for (int i = 0; i < NUM_OF_TEXTURES; i++) {
 		if (!load_texture(texture_filenames[i], *textures[i], true, false))
 		{
@@ -246,57 +278,22 @@ void init(GLWrapper *glw)
 		}
 	}
 
-	/*if (!load_texture("..\\..\\images\\glass1.jpg", texID, true, false))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}
-
-	if (!load_texture("..\\..\\images\\snowflake2.png", particle_texID, true, false))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}
-
-	if (!load_texture("..\\..\\images\\wooden_plank_2.jpg", floor_texID, true, false))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}
-
-	if (!load_texture("..\\..\\images\\wooden_plank_3.jpg", back_wall_texID, true, false))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}
-
-	if (!load_texture("..\\..\\images\\wood_table_1.jpg", table_texID, true, true))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}
-
-	if (!load_texture("..\\..\\images\\old_house_window.jpg", window_texID, true, true))
-	{
-		cout << "Fatal error loading texture: " << endl;
-		exit(0);
-	}*/
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);	
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 
 	// Enable gl_PointSize
 	glEnable(GL_PROGRAM_POINT_SIZE);
-
+	
 	/* Load and build the vertex and fragment shaders */
 	try
 	{
-		shaders[0] = Shader(glw->LoadShader("lamppost.vert", "lamppost.frag"));
-		shaders[1] = Shader(glw->LoadShader("glass.vert", "glass.frag"));
-		shaders[2] = Shader(glw->LoadShader("point_sprites.vert", "point_sprites.frag"));
-		shaders[3] = Shader(glw->LoadShader("floor.vert", "floor.frag"));
+		shaders[0] = Shader(glw->LoadShader("shaders\\lamppost.vert", "shaders\\lamppost.frag"));
+		shaders[1] = Shader(glw->LoadShader("shaders\\glass.vert", "shaders\\glass.frag"));
+		shaders[2] = Shader(glw->LoadShader("shaders\\point_sprites.vert", "shaders\\point_sprites.frag"));
+		shaders[3] = Shader(glw->LoadShader("shaders\\floor.vert", "shaders\\floor.frag"));
+		shaders[4] = Shader(glw->LoadShader("shaders\\shadow_matrix.vert", "shaders\\shadow_matrix.frag"));
 	}
 	catch (exception& e)
 	{
@@ -315,6 +312,14 @@ void init(GLWrapper *glw)
 	glGenBuffers(1, &window_vbo);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	// Print controls to console
+	cout << "Controls:" << endl;
+	cout << "Rotating view: 7-0, O and P" << endl;
+	cout << "Turn snowglobe: Q W, E R, T Y" << endl;
+	cout << "Step back: K L" << endl;
+	cout << "Change drawmode: N" << endl;
+	cout << "Exit: ESC" << endl;
 }
 
 /* Called to update the display. Note that this function is called in the event loop in the wrapper
@@ -349,34 +354,36 @@ void display()
 	// Define the light position and transform by the view matrix
 	vec4 lightpos = view * vec4(light_x, light_y, light_z, 1.0);
 
-	program = &shaders[1]; // Change to 0
+	// Draw light
+	program = &shaders[1];
 	glUseProgram(program->shaderID);
 
+	glBindTexture(GL_TEXTURE_2D, texID);
+
 	mat4 model = mat4(1.0f);
+	model = rotate(model, -radians(angle_x), vec3(1, 0, 0));
+	model = rotate(model, -radians(angle_y), vec3(0, 1, 0));
+	model = rotate(model, -radians(angle_z), vec3(0, 0, 1));
 	model = translate(model, vec3(light_x, light_y, light_z));
-	model = scale(model, vec3(0.05f, 0.05f, 0.05f)); // make a small sphere
-	// Recalculate the normal matrix and send the model and normal matrices to the vertex shader																							// Recalculate the normal matrix and send to the vertex shader																								// Recalculate the normal matrix and send to the vertex shader																								// Recalculate the normal matrix and send to the vertex shader																						// Recalculate the normal matrix and send to the vertex shader
-	/*glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
-	normalmatrix = transpose(inverse(mat3(view * model.top())));
-	glUniformMatrix3fv(normalmatrixID, 1, GL_FALSE, &normalmatrix[0][0]);*/
+	model = scale(model, vec3(0.05f, 0.05f, 0.05f));
 
 	glUniform1ui(program->colourmodeID, colourmode);
 	glUniformMatrix4fv(program->viewID, 1, GL_FALSE, &view[0][0]);
 	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
 	glUniform1f(program->alphaValueID, alphaValue);
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
+	glUniform4fv(program->lightposID, 1, value_ptr(lightpos));
 
 	/* Draw our lightposition sphere  with emit mode on*/
-	/*emitmode = 1;
-	glUniform1ui(emitmodeID, emitmode);*/
+	emitmode = 1;
+	glUniform1ui(program->emitmodeID, emitmode);
 	aSphere.drawSphere(drawmode);
-	/*emitmode = 0;
-	glUniform1ui(emitmodeID, emitmode);*/
-	
+	emitmode = 0;
+	glUniform1ui(program->emitmodeID, emitmode);
 
 	/* Make the compiled shader program current */
 	// Draw lamppost
-	program = &shaders[0]; // Change to 0
+	program = &shaders[0];
 	glUseProgram(program->shaderID);
 
 	// Define the model transformations for the object
@@ -384,7 +391,7 @@ void display()
 	model = rotate(model, -radians(angle_x), vec3(1, 0, 0)); 
 	model = rotate(model, -radians(angle_y), vec3(0, 1, 0)); 
 	model = rotate(model, -radians(angle_z), vec3(0, 0, 1));
-	model = translate(model, vec3(x, y - 0.1f, z)); // - 0.8f
+	model = translate(model, vec3(x, y - 0.1f, z));
 	model = scale(model, vec3(scaler / 5.f, scaler / 5.f, scaler / 5.f));
 
 	// Send our uniforms variables to the currently bound shader,
@@ -393,6 +400,7 @@ void display()
 	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
 	glUniform1f(program->alphaValueID, alphaValue);
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
+	glUniform4fv(program->lightposID, 1, value_ptr(lightpos));
 
 	// Use the lamppost texture
 	glBindTexture(GL_TEXTURE_2D, texID);
@@ -403,7 +411,6 @@ void display()
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	// Draw table
-
 	// Define the model transformations for the object
 	model = mat4(1.0f);
 	model = translate(model, vec3(x, y - 0.1f, z)); // - 0.8f
@@ -412,23 +419,38 @@ void display()
 	model = rotate(model, -radians(90.f), vec3(0, 1, 0));
 
 	// Send our uniforms variables to the currently bound shader,
-	/*glUniform1ui(program->colourmodeID, colourmode);
-	glUniformMatrix4fv(program->viewID, 1, GL_FALSE, &view[0][0]);
-	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
-	glUniform1f(program->alphaValueID, alphaValue);*/
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
 
-	// Use the lamppost texture
+	// Use the table texture
 	glBindTexture(GL_TEXTURE_2D, table_texID);
-
-	/* Draw our Blender table object */
 	table.drawObject(drawmode);
-
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	// Particle animation
+	// Particle shadows
+	program = &shaders[4];
+	glUseProgram(program->shaderID);
+	glBindTexture(GL_TEXTURE_2D, 0);
 
-	glEnable(GL_BLEND); // Maybe we need this here because of overlapping stars?
+	// Define the model transformations 
+	model = mat4(1.0f);
+	model = translate(model, vec3(x, y, z));
+	model = scale(model, vec3(scaler * 5, scaler * 5, scaler * 5));//scale equally in all axis
+
+	model = translate(model, vec3(0.f, -0.19f, 0.f));
+	// Calculate the shadow matrix from light position and plane normal
+	mat4 shadow = shadow_matrix(vec4(light_x, light_y, light_z, 1.0), vec4(0, 1.0, 0, 0.0));
+	model = model * shadow;
+
+	// Send uniforms to shadow shader
+	glUniformMatrix4fv(program->viewID, 1, GL_FALSE, &view[0][0]);
+	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
+	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
+
+	//point_anim->updateAngle(angle_x, angle_y, angle_z, rotation_matrix);
+	point_anim->draw();
+
+	// Particle animation
+	glEnable(GL_BLEND);
 
 	// Switch to particle shader
 	program = &shaders[2];
@@ -436,20 +458,18 @@ void display()
 
 	glBindTexture(GL_TEXTURE_2D, particle_texID);
 
-	mat4 rotation_matrix = mat4(1.f);
-
 	// Define the model transformations 
 	model = mat4(1.0f);
 	model = translate(model, vec3(x, y, z));
-	model = scale(model, vec3(scaler * 5, scaler * 5, scaler * 5));//scale equally in all axis
-	// These probably should be removed so the snow doesnt rotate
-	model = rotate(model, -radians(angle_x), vec3(1, 0, 0)); //rotating in clockwise direction around x-axis
-	model = rotate(model, -radians(angle_y), vec3(0, 1, 0)); //rotating in clockwise direction around y-axis
-	model = rotate(model, -radians(angle_z), vec3(0, 0, 1)); //rotating in clockwise direction around z-axis
+	model = scale(model, vec3(scaler * 5, scaler * 5, scaler * 5));
+	model = rotate(model, -radians(angle_x), vec3(1, 0, 0));
+	model = rotate(model, -radians(angle_y), vec3(0, 1, 0));
+	model = rotate(model, -radians(angle_z), vec3(0, 0, 1));
 
-	rotation_matrix = rotate(rotation_matrix, -radians(angle_x), vec3(1, 0, 0)); //rotating in clockwise direction around x-axis
-	rotation_matrix = rotate(rotation_matrix, -radians(angle_y), vec3(0, 1, 0)); //rotating in clockwise direction around y-axis
-	rotation_matrix = rotate(rotation_matrix, -radians(angle_z), vec3(0, 0, 1)); //rotating in clockwise direction around z-axis
+	mat4 rotation_matrix = mat4(1.f); // Passed to updateAngle to calculate inverse
+	rotation_matrix = rotate(rotation_matrix, -radians(angle_x), vec3(1, 0, 0));
+	rotation_matrix = rotate(rotation_matrix, -radians(angle_y), vec3(0, 1, 0));
+	rotation_matrix = rotate(rotation_matrix, -radians(angle_z), vec3(0, 0, 1));
 
 	// Send our uniforms variables to the currently bound shader,
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
@@ -472,16 +492,14 @@ void display()
 
 	// Define the model transformations 
 	model = mat4(1.0f);
-	//model = translate(model, vec3(x, y, z));
-	model = translate(model, vec3(0.f, -3.f, 0.7f));
-	model = scale(model, vec3(2.f, 1.0f, 1.f));//scale equally in all axis
+	model = translate(model, vec3(-1.3f, -3.f, 0.7f));
+	model = scale(model, vec3(1.4f, 1.0f, 1.f));
 
 	// Send our uniforms variables to the currently bound shader,
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
 	glUniform1ui(program->colourmodeID, colourmode);
 	glUniformMatrix4fv(program->viewID, 1, GL_FALSE, &view[0][0]);
 	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
-	//glUniform4fv(program->lightposID, 1, GL_FALSE, value_ptr(lightpos));
 	glUniform4fv(program->lightposID, 1, value_ptr(lightpos));
 
 	mat3 normalmatrix = transpose(inverse(mat3(view * model)));
@@ -505,9 +523,9 @@ void display()
 
 	// Define the model transformations 
 	model = mat4(1.0f);
-	model = translate(model, vec3(0.f, -0.3f, -2.f));	
+	model = translate(model, vec3(-1.3f, -0.3f, -2.f));	
 	model = rotate(model, -radians(-90.f), vec3(1, 0, 0)); 
-	model = scale(model, vec3(2.f, 1.5f, 1.f));
+	model = scale(model, vec3(1.4f, 1.0f, 1.f));
 
 	// Send our uniforms variables to the currently bound shader,
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
@@ -582,6 +600,8 @@ void display()
 	program = &shaders[1];
 	glUseProgram(program->shaderID);
 
+	glBindTexture(GL_TEXTURE_2D, texID);
+
 	/* Define the model transformations for our sphere */
 	model = mat4(1.0f);
 	model = translate(model, vec3(x, y, z));
@@ -595,10 +615,6 @@ void display()
 	glUniformMatrix4fv(program->projectionID, 1, GL_FALSE, &projection[0][0]);
 	glUniform1f(program->alphaValueID, alphaValue);
 	glUniformMatrix4fv(program->modelID, 1, GL_FALSE, &model[0][0]);
-
-	/* Draw our sphere */
-	/* Note that you probably want a different texture for this Sphere! */
-	//glBindTexture(GL_TEXTURE_2D, texID);
 	
 	glEnable(GL_BLEND);
 
@@ -635,22 +651,22 @@ static void keyCallback(GLFWwindow* window, int key, int s, int action, int mods
 	if (key == 'R') angle_inc_y += 0.05f;
 	if (key == 'T') angle_inc_z -= 0.05f;
 	if (key == 'Y') angle_inc_z += 0.05f;
-	if (key == 'A') scaler -= 0.02f;
-	if (key == 'S') scaler += 0.02f;
-	if (key == 'Z') x -= 0.05f;
+	//if (key == 'A') scaler -= 0.02f;
+	//if (key == 'S') scaler += 0.02f;
+	/*if (key == 'Z') x -= 0.05f;
 	if (key == 'X') x += 0.05f;
 	if (key == 'C') y -= 0.05f;
 	if (key == 'V') y += 0.05f;
 	if (key == 'B') z -= 0.05f;
-	if (key == 'N') z += 0.05f;
+	if (key == 'N') z += 0.05f;*/
 
 	// This is ball speed pls change
-	if (key == '1') light_x -= speed;
+	/*if (key == '1') light_x -= speed;
 	if (key == '2') light_x += speed;
 	if (key == '3') light_y -= speed;
 	if (key == '4') light_y += speed;
 	if (key == '5') light_z -= speed;
-	if (key == '6') light_z += speed;
+	if (key == '6') light_z += speed;*/
 
 	if (key == '7') vx -= 1.f;
 	if (key == '8') vx += 1.f;
@@ -661,13 +677,6 @@ static void keyCallback(GLFWwindow* window, int key, int s, int action, int mods
 
 	if (key == 'K') step_back += 1.f;
 	if (key == 'L') step_back -= 1.f;
-
-
-	if (key == 'M' && action != GLFW_PRESS)
-	{
-		colourmode = !colourmode;
-		cout << "colourmode=" << colourmode << endl;
-	}
 
 	/* Cycle between drawing vertices, mesh and filled polygons */
 	if (key == 'N' && action != GLFW_PRESS)
